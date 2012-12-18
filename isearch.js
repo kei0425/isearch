@@ -1,4 +1,20 @@
-var Isearch = function (element) {
+var Isearch = function (params) {
+    /**
+     * 入力フォーム
+     */
+    this.inputForm = params.inputForm;
+    /**
+     * inputノード
+     */
+    this.inputNode = params.inputNode;
+    /**
+     * 後方検索ボタン
+     */
+    this.backwardBotton = params.backwardBotton;
+    /**
+     * 前方検索ボタン
+     */
+    this.forwardBotton = params.forwardBotton;
     /**
      * ノードリスト
      */
@@ -19,6 +35,14 @@ var Isearch = function (element) {
      * 検索箇所インデックス
      */
     this.searchIndex = -1;
+    /**
+     * 候補選択
+     */
+    this.suggestSelect = -1;
+    /**
+     * 候補リスト
+     */
+    this.suggestNodeList = [];
     var
     self = this
     // ノードクリア
@@ -101,6 +125,7 @@ var Isearch = function (element) {
         newNode = this.node.ownerDocument.createElement('strong');
         this.selectedNode = newNode;
 
+        newNode.style.color = 'black';
         newNode.style.backgroundColor = 'yellow';
 
         newNode.appendChild(
@@ -117,15 +142,100 @@ var Isearch = function (element) {
         }
         return newNode;
     }
-    ;
+    // 候補選択
+    ,suggestSelect = function (selectIndex) {
+        if (self.suggestNodeList[selectIndex]
+            && self.suggestNodeList[selectIndex].onmouseenter) {
+            self.suggestNodeList[selectIndex].onmouseenter();
+        }
+    };
+
+    // イベント追加
+    /**
+     * シフトキー
+     */
+    this.inputForm.ownerDocument.onkeyup = function(e) {
+        self.shiftKey = e ? e.shiftKey : event.shiftKey;
+    };
+    this.inputForm.ownerDocument.onkeydown = function(e) {
+        self.shiftKey = e ? e.shiftKey : event.shiftKey;
+    };
+    /**
+     * エンター押下
+     */
+    this.inputForm.onsubmit = function () {
+        if (self.suggestSelect >= 0) {
+            self.suggestNodeList[self.suggestSelect].onclick();
+        }
+        if (self.shiftKey) {
+            self.searchBackward();
+        }
+        else {
+            self.searchForward();
+        }
+        self.deleteSuggest();
+        return false;
+    };
+    /**
+     * 矢印キー
+     */
+    this.inputNode.onkeydown = function (event) {
+        if (event) {
+            return;
+        }
+        // for IE
+        var keyCode = window.event.keyCode;
+        if (keyCode == 38) {
+            // 上
+            suggestSelect(self.suggestSelect - 1);
+        }
+        else if (keyCode == 40){
+            // 下
+            suggestSelect(self.suggestSelect + 1);
+        }
+    };
+    this.inputNode.onkeypress = function (event) {
+        if (!event) {
+            return;
+        }
+        // for FF
+        var keyCode = event.keyCode;
+        if (keyCode == 38) {
+            suggestSelect(self.suggestSelect - 1);
+        }
+        else if (keyCode == 40){
+            // 下
+            suggestSelect(self.suggestSelect + 1);
+        }
+    };
+    /**
+     * 検索キーワード入力
+     */
+    this.inputNode.onkeyup = function (event) {
+        var keyCode = event ? event.charCode : window.event.keyCode;
+        if (keyCode != 38 && keyCode != 40){
+            self.wordSearch();
+        }
+    };
+    /**
+     * 後方検索
+     */
+    this.backwardBotton.onclick = function () {
+        self.searchBackward();
+        self.deleteSuggest();
+    };
+    /**
+     * 前方検索
+     */
+    this.forwardBotton.onclick = function () {
+        self.searchForward();
+        self.deleteSuggest();
+    };
+
     /**
      * ノードリスト作成
      */
     this.makeNodeList = function (node) {
-        var
-        i
-        ;
-
         if (node.nodeType == Node.TEXT_NODE) {
             if (!node.parentNode) {
                 return;
@@ -145,9 +255,10 @@ var Isearch = function (element) {
         }
         else {
             // 子ノードチェック
-            for (i = 0; i < node.childNodes.length; i++) {
-                this.makeNodeList(node.childNodes[i]);
-            }
+            $A(node.childNodes).each(
+                function (x) {
+                    self.makeNodeList(x);
+                });
         }
     };
 
@@ -156,14 +267,11 @@ var Isearch = function (element) {
      */
     this.wordSearch = function () {
         var
-        word = $('searchword').value
-        ,i
-        ,j
+        word = this.inputNode.value
         ,node
         ,startIndex = 0
         ,nodeList
         ,kouhoIndex = 0
-        ,oldIndex = 0
         ,searchNode = function (startIndex, length) {
             var
             nodeList = []
@@ -187,29 +295,32 @@ var Isearch = function (element) {
 
             return nodeList;
         }
-
         ;
+
+
         if (this.word == word) {
             // 変らない場合は何もしない
             return;
         }
 
-        // 既存の検索位置を保持
-        if (this.searchIndex >= 0) {
-            oldIndex = this.kouhoList[this.searchIndex][0].index;
-        }
-
         // クリア
-        for (i = 0; i < this.kouhoList.length; i++) {
-            for (j = 0; j < this.kouhoList[i].length; j++) {
-                this.kouhoList[i][j].clearNode();
+        this.kouhoList.each(
+            function (x) {
+                x.each(
+                    function (x) {
+                        x.clearNode();
+                    }
+                );
             }
-        }
+        );
         
         this.kouhoList = [];
 
-        $('searchbackward').disabled = true;
-        $('searchforward').disabled = true;
+        this.backwardBotton.disabled = true;
+        this.forwardBotton.disabled = true;
+
+        // 候補非表示
+        this.deleteSuggest();
 
         if (word.length > 0) {
             while (true) {
@@ -223,15 +334,21 @@ var Isearch = function (element) {
                 // 該当ノード抽出
                 nodeList = searchNode(startIndex, word.length);
                 if (nodeList.length > 0) {
-                    this.kouhoList.push(nodeList);
-                }
+                    nodeList.selectNodeList = [];
+                    nodeList.text = '';
+                    nodeList.index = this.kouhoList.length;
 
-                nodeList.selectNodeList = [];
-
-                for (i = 0; i < nodeList.length; i++) {
                     // ノード選択
-                    nodeList.selectNodeList.push(
-                        nodeList[i].selectNode(startIndex, word.length));
+                    nodeList.each(
+                        function (x) {
+                            nodeList.selectNodeList.push(
+                                x.selectNode(startIndex, word.length));
+                            nodeList.text += x.text;
+                        }
+                    );
+                    nodeList.text = nodeList.text.replace(/(^\s+)|(\s+$)/g, '');
+
+                    this.kouhoList.push(nodeList);
                 }
 
                 startIndex++;
@@ -242,7 +359,9 @@ var Isearch = function (element) {
             // 検索箇所をさがす
             this.searchIndex = 0;
             while (this.searchIndex < this.kouhoList.length) {
-                if (oldIndex <= this.kouhoList[this.searchIndex][0].index) {
+                node = this.kouhoList[this.searchIndex][0].node;
+                if (node.ownerDocument.body.scrollTop <=
+                    Position.cumulativeOffset(node)[1]) {
                     break;
                 }
                 this.searchIndex++;
@@ -251,11 +370,174 @@ var Isearch = function (element) {
                 this.searchIndex = this.kouhoList.length - 1;
             }
             this.searchSelect(this.searchIndex);
+
         }
         else {
             this.searchIndex = -1;
         }
         this.word = word;
+
+        // 候補表示
+        this.suggest();
+    };
+
+    /**
+     * 候補表示
+     */
+    this.suggest = function () {
+        if (!this.inputForm || !this.inputForm.parentNode
+            || this.kouhoList.length <= 1) {
+            return;
+        }
+        var
+        suggestNode = this.inputForm.parentNode.childNodes[
+            $A(this.inputForm.parentNode.childNodes).indexOf(this.inputForm) + 1]
+        ,kouhoTextList
+        ,suggestText
+        ,suggestChild
+        ,count = 0
+        ,position
+        ;
+
+        // 候補リスト作成
+        kouhoTextList = {};
+        this.kouhoList.each(
+            function (x) {
+                if (!kouhoTextList[x.text]) {
+                    count++;
+                    kouhoTextList[x.text] = x;
+                }
+            });
+
+        if (count <= 1) {
+            // 候補が１以下なら表示しない
+            return;
+        }
+
+        if (!suggestNode || suggestNode.id != 'suggestList') {
+            // 候補ボックスがない場合は作成
+            suggestNode = this.inputForm.ownerDocument.createElement('div');
+            suggestNode.id = 'suggestList';
+            suggestNode.align = 'left';
+            suggestNode.style.position = 'absolute';
+            suggestNode.style.backgroundColor = '#FFFFFF';
+            suggestNode.style.border = '1px solid #CCCCFF';
+            position = Position.cumulativeOffset(this.inputForm);
+            suggestNode.style.top = position[1]
+                + this.inputForm.offsetHeight + 2 +'px';
+            suggestNode.style.right
+                = (document.body.clientWidth
+                   - (position[0] + this.inputForm.offsetWidth)) + 'px';
+            suggestNode.style.width = this.inputForm.offsetWidth +'px';
+            suggestNode.style.overflow = 'hidden';
+            if (this.inputForm.nextSibling) {
+                // 次の要素がある場合はその直前
+                this.inputForm.parentNode.insertBefore(
+                    suggestNode, this.inputForm.nextSibling);
+            }
+            else {
+                // ない場合は最後に追加
+                this.inputForm.parentNode.appendChild(suggestNode);
+            }
+        }
+        else {
+            suggestNode.style.display = '';
+            // 候補がある場合は削除
+            while (suggestNode.hasChildNodes()) {
+                suggestNode.removeChild(suggestNode.firstChild);
+            }
+        }
+
+        
+        // 候補に表示
+        self.suggestNodeList = [];
+        for (suggestText in kouhoTextList) {
+            suggestChild = suggestNode.ownerDocument.createElement('div');
+            suggestChild.style.color = '#888888';
+            kouhoTextList[suggestText].each(
+                function (node) {
+                    if (!node.node || !node.node.childNodes) {
+                        return;
+                    }
+                    $A(node.node.childNodes).each(
+                        function (childNode) {
+                            var newNode;
+                            if (childNode.nodeType == Node.TEXT_NODE) {
+                                // テキストの場合はそのまま追加
+                                suggestChild.appendChild(
+                                    suggestNode.ownerDocument.createTextNode(
+                                        childNode.nodeValue)
+                                );
+                            }
+                            else {
+                                // 強調の場合
+                                newNode = suggestNode.ownerDocument
+                                    .createElement('strong');
+                                newNode.appendChild(
+                                    suggestNode.ownerDocument.createTextNode(
+                                        childNode.firstChild.nodeValue)
+                                );
+                                newNode.style.color = 'black';
+                                suggestChild.appendChild(newNode);
+                            }
+                        }
+                    );
+                }
+            );
+
+            suggestChild.kouho = kouhoTextList[suggestText];
+            suggestChild.onclick = function () {
+                self.inputNode.value = this.kouho.text;
+                self.wordSearch();
+                self.deleteSuggest();
+            };
+            
+            // 候補リストに追加
+            self.suggestNodeList.push(suggestChild);
+        }
+
+        // ソート
+        self.suggestNodeList.sortBy(
+            function (x) {
+                return Position.cumulativeOffset(x.kouho.node)[1];
+            });
+
+        // 追加
+        self.suggestNodeList.each(
+            function (x, index) {
+                if (index < 20) {
+                    x.onmouseenter = function () {
+                        if (self.suggestSelect >= 0) {
+                            self.suggestNodeList[self.suggestSelect]
+                                .style.backgroundColor = '';
+                        }
+                        self.suggestSelect = index;
+                        this.style.backgroundColor = 'blue';
+                        self.searchSelect(this.kouho.index);
+                    };
+                    suggestNode.appendChild(x);
+                }
+            }
+        );
+    };
+
+    /**
+     * 候補削除
+     */
+    this.deleteSuggest = function () {
+        this.suggestSelect = -1;
+        if (!this.inputForm || !this.inputForm.parentNode) {
+            return;
+        }
+        var
+        suggestNode = this.inputForm.parentNode.childNodes[
+            $A(this.inputForm.parentNode.childNodes).indexOf(this.inputForm) + 1]
+        ;
+
+        if (suggestNode && suggestNode.id == 'suggestList') {
+            // 候補を消す
+            suggestNode.style.display = 'none';
+        }
     };
 
     /**
@@ -274,43 +556,50 @@ var Isearch = function (element) {
      * 指定候補表示
      */
     this.searchSelect = function (selectIndex) {
+        var node;
         if (selectIndex < 0 || this.kouhoList.length <= selectIndex) {
             return;            
         }
-        var
-        kouhoList
-        ,i
-        ;
         // 前を戻す
         if (this.searchIndex >= 0) {
-            kouhoList = this.kouhoList[this.searchIndex];
-            for (i = 0; i < kouhoList.selectNodeList.length; i++) {
-                kouhoList.selectNodeList[i].style.backgroundColor = 'yellow';
-            }
+            this.kouhoList[this.searchIndex].selectNodeList.each(
+                function (x) {
+                    x.style.color = 'black';
+                    x.style.backgroundColor = 'yellow';
+                }
+            );
         }
         this.searchIndex = selectIndex;
 
         // 選択対象を選択
-        kouhoList = this.kouhoList[this.searchIndex];
-        for (i = 0; i < kouhoList.selectNodeList.length; i++) {
-            kouhoList.selectNodeList[i].style.backgroundColor = 'blue';
-        }
+        this.kouhoList[this.searchIndex].selectNodeList.each(
+            function (x) {
+                x.style.color = 'white';
+                x.style.backgroundColor = 'blue';
+            }
+        );
         
         // ボタン
         if (this.searchIndex > 0) {
-            $('searchbackward').disabled = false;
+            this.backwardBotton.disabled = false;
         }
         else {
-            $('searchbackward').disabled = true;
+            this.backwardBotton.disabled = true;
         }
         if (this.searchIndex < this.kouhoList.length - 1) {
-            $('searchforward').disabled = false;
+            this.forwardBotton.disabled = false;
         }
         else {
-            $('searchforward').disabled = true;
+            this.forwardBotton.disabled = true;
         }
 
-        kouhoList[0].node.ownerDocument.location.hash
-            = '#' + kouhoList[0].node.name;
+        node = this.kouhoList[this.searchIndex][0];
+        if (this.onJump) {
+          this.onJump(node.node);
+        }
+        else {
+            node.node.ownerDocument.location.hash
+                = '#' + node.node.name;
+        }
     };
 };
