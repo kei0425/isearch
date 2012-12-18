@@ -16,6 +16,10 @@ var Isearch = function (params) {
      */
     this.forwardBotton = params.forwardBotton;
     /**
+     * 前方検索ボタン
+     */
+    this.suggestHeight = params.suggestHeight || 400;
+    /**
      * ノードリスト
      */
     this.nodeList = [];
@@ -152,6 +156,12 @@ var Isearch = function (params) {
 
     // イベント追加
     /**
+     * その他クリックはキャンセル
+     */
+    document.body.onclick = function () {
+        self.deleteSuggest();
+    };
+    /**
      * シフトキー
      */
     this.inputForm.ownerDocument.onkeyup = function(e) {
@@ -164,18 +174,29 @@ var Isearch = function (params) {
      * エンター押下
      */
     this.inputForm.onsubmit = function () {
-        if (self.suggestSelect >= 0) {
-            self.suggestNodeList[self.suggestSelect].onclick();
-        }
         if (self.shiftKey) {
-            self.searchBackward();
+            suggestSelect(self.suggestSelect - 1);
         }
         else {
-            self.searchForward();
+            suggestSelect(self.suggestSelect + 1);
         }
-        self.deleteSuggest();
         return false;
     };
+    /**
+     * 入力欄クリック
+     */
+    this.inputNode.onclick = function (event) {
+        // 候補表示
+        self.wordSearch();
+        if (event) {
+            event.stopPropagation();
+        }
+        else {
+            window.event.cancelBubble = true;
+        }
+        console.log('input.onclick');
+    };
+    
     /**
      * 矢印キー
      */
@@ -220,16 +241,28 @@ var Isearch = function (params) {
     /**
      * 後方検索
      */
-    this.backwardBotton.onclick = function () {
-        self.searchBackward();
-        self.deleteSuggest();
+    this.backwardBotton.onclick = function (event) {
+        suggestSelect(self.suggestSelect - 1);
+        self.inputNode.focus();
+        if (event) {
+            event.stopPropagation();
+        }
+        else {
+            window.event.cancelBubble = true;
+        }
     };
     /**
      * 前方検索
      */
-    this.forwardBotton.onclick = function () {
-        self.searchForward();
-        self.deleteSuggest();
+    this.forwardBotton.onclick = function (event) {
+        suggestSelect(self.suggestSelect + 1);
+        self.inputNode.focus();
+        if (event) {
+            event.stopPropagation();
+        }
+        else {
+            window.event.cancelBubble = true;
+        }
     };
 
     /**
@@ -392,27 +425,12 @@ var Isearch = function (params) {
         var
         suggestNode = this.inputForm.parentNode.childNodes[
             $A(this.inputForm.parentNode.childNodes).indexOf(this.inputForm) + 1]
-        ,kouhoTextList
         ,suggestText
         ,suggestChild
         ,count = 0
         ,position
+        ,childHeight
         ;
-
-        // 候補リスト作成
-        kouhoTextList = {};
-        this.kouhoList.each(
-            function (x) {
-                if (!kouhoTextList[x.text]) {
-                    count++;
-                    kouhoTextList[x.text] = x;
-                }
-            });
-
-        if (count <= 1) {
-            // 候補が１以下なら表示しない
-            return;
-        }
 
         if (!suggestNode || suggestNode.id != 'suggestList') {
             // 候補ボックスがない場合は作成
@@ -422,6 +440,9 @@ var Isearch = function (params) {
             suggestNode.style.position = 'absolute';
             suggestNode.style.backgroundColor = '#FFFFFF';
             suggestNode.style.border = '1px solid #CCCCFF';
+            suggestNode.style.filter = 'alpha(opacity=75)';
+            suggestNode.style.MozOpacity = 0.75;
+            suggestNode.style.opacity = 0.75;
             position = Position.cumulativeOffset(this.inputForm);
             suggestNode.style.top = position[1]
                 + this.inputForm.offsetHeight + 2 +'px';
@@ -429,7 +450,7 @@ var Isearch = function (params) {
                 = (document.body.clientWidth
                    - (position[0] + this.inputForm.offsetWidth)) + 'px';
             suggestNode.style.width = this.inputForm.offsetWidth +'px';
-            suggestNode.style.overflow = 'hidden';
+            suggestNode.style.overflow = 'auto';
             if (this.inputForm.nextSibling) {
                 // 次の要素がある場合はその直前
                 this.inputForm.parentNode.insertBefore(
@@ -450,75 +471,93 @@ var Isearch = function (params) {
 
         
         // 候補に表示
-        self.suggestNodeList = [];
-        for (suggestText in kouhoTextList) {
-            suggestChild = suggestNode.ownerDocument.createElement('div');
-            suggestChild.style.color = '#888888';
-            kouhoTextList[suggestText].each(
-                function (node) {
-                    if (!node.node || !node.node.childNodes) {
-                        return;
-                    }
-                    $A(node.node.childNodes).each(
-                        function (childNode) {
-                            var newNode;
-                            if (childNode.nodeType == Node.TEXT_NODE) {
-                                // テキストの場合はそのまま追加
-                                suggestChild.appendChild(
-                                    suggestNode.ownerDocument.createTextNode(
-                                        childNode.nodeValue)
-                                );
-                            }
-                            else {
-                                // 強調の場合
-                                newNode = suggestNode.ownerDocument
-                                    .createElement('strong');
-                                newNode.appendChild(
-                                    suggestNode.ownerDocument.createTextNode(
-                                        childNode.firstChild.nodeValue)
-                                );
-                                newNode.style.color = 'black';
-                                suggestChild.appendChild(newNode);
-                            }
-                        }
-                    );
-                }
-            );
-
-            suggestChild.kouho = kouhoTextList[suggestText];
-            suggestChild.onclick = function () {
-                self.inputNode.value = this.kouho.text;
-                self.wordSearch();
-                self.deleteSuggest();
-            };
-            
-            // 候補リストに追加
-            self.suggestNodeList.push(suggestChild);
-        }
-
-        // ソート
-        self.suggestNodeList.sortBy(
+        self.suggestNodeList = this.kouhoList.map(
             function (x) {
-                return Position.cumulativeOffset(x.kouho.node)[1];
-            });
-
-        // 追加
-        self.suggestNodeList.each(
-            function (x, index) {
-                if (index < 20) {
-                    x.onmouseenter = function () {
-                        if (self.suggestSelect >= 0) {
-                            self.suggestNodeList[self.suggestSelect]
-                                .style.backgroundColor = '';
+                suggestChild = suggestNode.ownerDocument.createElement('div');
+                suggestChild.style.width = '90%';
+                suggestChild.style.color = '#888888';
+                x.each(
+                    function (node) {
+                        if (!node.node || !node.node.childNodes) {
+                            return;
                         }
-                        self.suggestSelect = index;
-                        this.style.backgroundColor = 'blue';
-                        self.searchSelect(this.kouho.index);
-                    };
-                    suggestNode.appendChild(x);
-                }
+                        $A(node.node.childNodes).each(
+                            function (childNode) {
+                                var newNode;
+                                if (childNode.nodeType == Node.TEXT_NODE) {
+                                    // テキストの場合はそのまま追加
+                                    suggestChild.appendChild(
+                                        suggestNode.ownerDocument.createTextNode(
+                                            childNode.nodeValue)
+                                    );
+                                }
+                                else {
+                                    // 強調の場合
+                                    newNode = suggestNode.ownerDocument
+                                        .createElement('strong');
+                                    newNode.appendChild(
+                                        suggestNode.ownerDocument.createTextNode(
+                                            childNode.firstChild.nodeValue)
+                                    );
+                                    newNode.style.color = 'black';
+                                    suggestChild.appendChild(newNode);
+                                }
+                            }
+                        );
+                    }
+                );
+
+                suggestChild.kouho = x;
+                suggestChild.onclick = function (event) {
+                    self.inputNode.value = this.kouho.text;
+                    self.wordSearch();
+                    self.inputNode.focus();
+                    if (event) {
+                        event.stopPropagation();
+                    }
+                    else {
+                        window.event.cancelBubble = true;
+                    }
+                };
+
+                return suggestChild;
             }
         );
+
+        // 追加
+        childHeight = 0;
+        self.suggestNodeList.each(
+            function (x, index) {
+                suggestNode.appendChild(x);
+
+                x.onmouseenter = function () {
+                    if (self.suggestSelect >= 0) {
+                        self.suggestNodeList[self.suggestSelect]
+                            .style.backgroundColor = '';
+                    }
+                    self.suggestSelect = index;
+                    this.style.backgroundColor = 'blue';
+                    self.searchSelect(this.kouho.index);
+                    // はみ出たらスクロール
+                    if (x.offsetTop <= x.parentNode.scrollTop) {
+                        x.parentNode.scrollTop = x.offsetTop - 15;
+                    }
+                    else if (x.parentNode.scrollTop + self.suggestHeight
+                             <= x.offsetTop + x.offsetHeight){
+                        x.parentNode.scrollTop = x.offsetTop + x.offsetHeight
+                            - self.suggestHeight + 15;
+                    }
+                };
+                childHeight = x.offsetTop + x.offsetHeight;
+            }
+        );
+
+        if (childHeight > this.suggestHeight) {
+            suggestNode.style.height = this.suggestHeight + 'px';
+        }
+        else {
+            suggestNode.style.height = '';
+        }
     };
 
     /**
@@ -538,6 +577,8 @@ var Isearch = function (params) {
             // 候補を消す
             suggestNode.style.display = 'none';
         }
+
+        this.word = '';
     };
 
     /**
